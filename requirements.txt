@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+requests
+beautifulsoup4
+chromadb
+ollama
+duckduckgo-search
+python-dotenv
+sse-starlette
+pydantic>=2
