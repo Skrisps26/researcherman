@@ -1,182 +1,172 @@
-# ResearcherMan 🧪📚
+# Researcherman ◎
 
-An autonomous multi-agent research system powered by Ollama that takes a research question, plans a search strategy, executes web searches, evaluates findings for credibility, and produces a structured markdown report.
+An autonomous multi-agent research system powered by Ollama that takes a research question, plans a search strategy, executes web searches, evaluates findings for credibility, and produces a structured markdown report. All processing happens locally — no data leaves your machine.
 
 ## Architecture
 
-ResearcherMan uses a pipeline of specialized AI agents:
+```mermaid
+flowchart LR
+    style User fill:#252119,stroke:#c49a3c,color:#e8e2d6,stroke-width:2px
+    style Planner fill:#252119,stroke:#5b8cc7,color:#5b8cc7,stroke-width:2px
+    style Searcher fill:#252119,stroke:#c49a3c,color:#c49a3c,stroke-width:2px
+    style Critic fill:#252119,stroke:#c1553e,color:#c1553e,stroke-width:2px
+    style Writer fill:#252119,stroke:#6a9e5c,color:#6a9e5c,stroke-width:2px
+    style ReportStyle fill:#252119,stroke:#e0b84d,color:#e0b84d,stroke-width:2px,stroke-dasharray: 5 5
+    style DDG fill:#1a1714,stroke:#7a7264,color:#7a7264,stroke-width:1px
+    style ChromaDB fill:#1a1714,stroke:#7a7264,color:#7a7264,stroke-width:1px
+    style Ollama fill:#1a1714,stroke:#7a7264,color:#7a7264,stroke-width:1px
 
-```
-┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
-│ Planner  │ -> │ Searcher │ -> │  Critic  │ -> │  Writer  │ -> │  Report  │
-│  Agent   │    │  Agent   │    │  Agent   │    │  Agent   │    │  (Markdown) │
-└──────────┘    └──────────┘    └──────────┘    └──────────┘    └──────────┘
+    subgraph Agents
+        direction LR
+        Planner[◈ Planner]
+        Searcher[◎ Searcher]
+        Critic[◆ Critic]
+        Writer[✦ Writer]
+    end
+
+    User(Research Question) --> Planner
+    Planner -->|search queries| Searcher
+    Searcher -->|findings| Critic
+    
+    DDG[🔍 DuckDuckGo] <--> Searcher
+    Searcher <-->|scrape & summarize| Ollama[gemma / Ollama LLM]
+    Searcher <-->|embed & store| ChromaDB[(ChromaDB)]
+    Critic <-->|verify| ChromaDB
+    
+    Critic -->|"proceed ✓"| Writer
+    Critic -->|"needs research ↺"| Searcher
+    
+    Writer -->|"structured markdown"| ReportStyle[◎ Research Report]
 ```
 
-- **Planner Agent** (`agents/planner.py`): Decomposes a research question into subtopics and targeted search queries. Output includes scope assessment (narrow/medium/broad).
-- **Search Agent** (`agents/searcher.py`): Executes search queries via DuckDuckGo, scrapes web content, generates concise summaries with Ollama, and stores all findings in a ChromaDB vector store for sem-aware retrieval.
-- **Critic Agent** (`agents/critic.py`): Cross-examines all collected findings, identifies contradictions between sources, flags weak or unsupported claims, and assigns a confidence score.
-- **Writer Agent** (`agents/writer.py`): Synthesizes verified claims, contradictions, subtopic breakdowns, and source citations into a well-structured markdown research report.
+### Agent Roles
+
+| Agent | Purpose | Output |
+|-------|---------|--------|
+| **◈ Planner** | Decomposes question into subtopics & search queries | JSON plan with scope assessment |
+| **◎ Searcher** | DuckDuckGo search, web scraping, Ollama summarization, ChromaDB storage | Semantic findings with confidence tags |
+| **◆ Critic** | Cross-examines findings for contradictions & weak sources | Verified claims, contradictions, confidence score |
+| **✦ Writer** | Synthesizes everything into a polished report | Structured markdown with sources |
+
+The Critic can loop back to the Searcher if findings are insufficient (max 1 retry).
 
 ## Project Structure
 
 ```
 researcherman/
-├── .env                    # Environment configuration (Ollama URL, model names)
+├── .env                    # Ollama URL, model config
 ├── requirements.txt        # Python dependencies
+├── main.py                 # FastAPI backend + SSE streaming
 ├── venv/                   # Python virtual environment
-├── README.md               # This file
+├── README.md
+│
 ├── agents/
 │   ├── __init__.py
-│   ├── planner.py          # Planner Agent - question decomposition
-│   ├── searcher.py         # Search Agent - web search & summarization
-│   ├── critic.py           # Critic Agent - fact checking & validation
-│   └── writer.py           # Writer Agent - report generation
+│   ├── planner.py          # ◈ Question decomposition
+│   ├── searcher.py         # ◎ Web search & summarization
+│   ├── critic.py           # ◆ Fact checking & validation
+│   └── writer.py           # ✦ Report generation
+│
 ├── core/
 │   ├── __init__.py
 │   ├── memory.py           # ChromaDB vector store wrapper
-│   └── scraper.py          # Web content scraper (BS4-based)
+│   ├── orchestrator.py     # Agent pipeline manager
+│   └── scraper.py          # BS4 web scraper
+│
 ├── data/
-│   ├── chroma_db/          # ChromaDB persistent storage
-│   └── reports/            # Generated markdown reports
+│   ├── chroma_db/          # ChromaDB persistent storage (auto-created)
+│   └── reports/            # Generated markdown reports (auto-created)
+│
 └── frontend/
+    ├── index.html
+    ├── vite.config.js
+    ├── package.json
     └── src/
-        ├── components/     # Frontend UI components
-        └── styles/         # Frontend stylesheets
+        ├── main.jsx
+        ├── App.jsx
+        ├── styles/index.css
+        └── components/
+            ├── QueryInput.jsx
+            ├── AgentFeed.jsx
+            ├── MemoryPanel.jsx
+            └── ReportViewer.jsx
 ```
 
 ## Prerequisites
 
 - **Python 3.10+**
-- **Ollama** running locally with required models pulled:
-  - `mistral:7b-instruct-q4_K_M` (default chat model)
-  - `nomic-embed-text` (default embedding model)
-
-Install and start Ollama:
+- **Node.js 18+**
+- **Ollama** running locally with required models:
+  - `qwen2.5:3b` (default chat model — ~2GB, fits GPU)
+  - `nomic-embed-text` (embedding model — ~274MB)
 
 ```bash
 # Install Ollama (Linux/macOS)
 curl -fsSL https://ollama.com/install.sh | sh
 
 # Pull required models
-ollama pull mistral:7b-instruct-q4_K_M
+ollama pull qwen2.5:3b
 ollama pull nomic-embed-text
 
-# Start Ollama server
+# Start Ollama
 ollama serve
 ```
+
+### Hardware Notes
+
+Designed for **4GB VRAM** systems. The default model (`qwen2.5:3b`) runs fully on GPU (~2GB VRAM). Larger models like `mistral:7b` or `gemma4:e2b` will work with CPU/GPU offloading but are significantly slower due to partial CPU inference.
 
 ## Quick Start
 
 ```bash
-# 1. Activate virtual environment (already created)
-source venv/bin/activate   # On Windows: venv\Scripts\activate
+# Activate virtual environment
+cd researcherman
+source venv/bin/activate    # Windows: venv\Scripts\activate
 
-# 2. Dependencies already installed via pip install -r requirements.txt
-
-# 3. Start the backend
+# Start the backend (port 8000)
 python main.py
 
-# 4. In another terminal, start the frontend
-cd frontend && npm run dev
+# In another terminal, start the frontend (port 3001)
+cd frontend
+npm run dev
 ```
 
-Open http://localhost:3000 in your browser. Enter a research question and hit Go~!
+Open **http://localhost:3001** in your browser. Enter a research question and hit **Initiate** ◎
 
 ## Configuration
 
-All settings are managed via `.env`:
+All settings managed via `.env`:
 
-| Variable         | Default                                  | Description                     |
-|------------------|------------------------------------------|---------------------------------|
-| `OLLAMA_BASE_URL`| `http://localhost:11434`                 | Ollama API endpoint             |
-| `CHAT_MODEL`     | `mistral:7b-instruct-q4_K_M`             | LLM for reasoning & writing     |
-| `EMBED_MODEL`    | `nomic-embed-text`                       | Embedding model for vector store|
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama API endpoint |
+| `CHAT_MODEL` | `qwen2.5:3b` | LLM for reasoning & writing |
+| `EMBED_MODEL` | `nomic-embed-text` | Embedding model for vector store |
 
-### Using Different Models
-
-You can swap in any Ollama-compatible model by editing `.env`:
+Swap any supported Ollama model:
 
 ```bash
-# Larger model for accuracy
-CHAT_MODEL=llama3:70b
+# Faster but weaker
+CHAT_MODEL=gemma3:1b
 
-# Faster model for quick results
-CHAT_MODEL=phi3:3.8b
+# Reasonable balance (4GB+ GPU)
+CHAT_MODEL=llama3.2:3b
 ```
 
-## Agent Details
+## API Endpoints
 
-### Planner Agent
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/research` | Submit a question → returns `session_id` |
+| `GET` | `/stream/{session_id}` | SSE stream of agent activity |
+| `GET` | `/report/{session_id}` | Get the final markdown report |
+| `GET` | `/memory/{session_id}` | View stored ChromaDB findings |
+| `DELETE` | `/memory/{session_id}` | Clear session memory |
+| `GET` | `/health` | Check Ollama connectivity & model availability |
 
-Takes a free-form research question and returns:
+## Design
 
-```json
-{
-  "main_question": "Clear reformulation of the research question",
-  "subtopics": ["topic1", "topic2", "topic3"],
-  "search_queries": ["query1", "query2", "query3"],
-  "scope": "narrow | medium | broad"
-}
-```
-
-### Search Agent
-
-- Performs DuckDuckGo searches for each query
-- Scrapes top 3 results per query using BeautifulSoup4
-- Summarizes each page's content with Ollama (keeps summaries concise)
-- Stores findings in ChromaDB with embeddings for semantic search
-
-### Critic Agent
-
-Cross-examination outputs:
-
-```json
-{
-  "verified_claims": ["well-supported claim 1", "..."],
-  "contradictions": [
-    {"claim_a": "...", "claim_b": "...", "note": "explanation"}
-  ],
-  "weak_sources": [{"url": "...", "issue": "reason"}],
-  "overall_confidence": "high | medium | low",
-  "recommendation": "proceed | needs_more_research"
-}
-```
-
-### Writer Agent
-
-Produces a markdown report with:
-- Title and executive summary
-- Findings organized by subtopic
-- Contradictions and caveats section
-- Source list with URLs
-- Confidence assessment
-
-## API Usage (FastAPI)
-
-ResearcherMan can also run as a server with SSE (Server-Sent Events) streaming:
-
-```bash
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-Endpoints:
-- `POST /api/research` - Submit a research question, receive streaming progress updates
-- `GET /api/reports` - List generated reports
-- `GET /api/reports/{filename}` - Get a specific report's markdown content
-
-## Development
-
-```bash
-# Run tests
-pytest tests/
-
-# Lint
-ruff check .
-
-# Format
-ruff format .
-```
+The frontend uses an **archival research terminal** aesthetic — warm paper tones, brass accents, CRT scanlines, and declassified document styling. Built with React, Vite, and Tailwind CSS. The terminal reports real-time agent activity via SSE and renders final reports with editorial typography.
 
 ## License
 
